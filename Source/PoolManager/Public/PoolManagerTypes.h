@@ -147,6 +147,10 @@ struct POOLMANAGER_API FPoolObjectData
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient)
 	FPoolObjectHandle Handle = FPoolObjectHandle::EmptyHandle;
 
+	/** The context object that is associated with this pool object. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient)
+	UObject* Context = nullptr;
+
 	/*********************************************************************************************
 	 * Getters and operators
 	 ********************************************************************************************* */
@@ -261,7 +265,7 @@ struct POOLMANAGER_API FSpawnRequest
 	explicit FSpawnRequest(const UClass* InClass);
 
 	/** Returns array of spawn requests by specified class and their amount. */
-	static void MakeRequests(TArray<FSpawnRequest>& OutRequests, const UClass* InClass, int32 Amount, ESpawnRequestPriority Priority);
+	static void MakeRequests(TArray<FSpawnRequest>& OutRequests, const UClass* InClass, int32 Amount, ESpawnRequestPriority Priority, UObject* Context);
 
 	/** Leave only those requests that are not in the list of free objects. */
 	static void FilterRequests(TArray<FSpawnRequest>& InOutRequests, const TArray<FPoolObjectData>& FreeObjectsData, int32 ExpectedAmount = INDEX_NONE);
@@ -273,6 +277,10 @@ struct POOLMANAGER_API FSpawnRequest
 	/** Priority of the spawn request in the queue, higher priority object is spawned first. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Transient)
 	ESpawnRequestPriority Priority = ESpawnRequestPriority::Normal;
+
+	/** Context object that is associated with this spawn request. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Transient)
+	UObject* Context = nullptr;
 
 	/** The handle associated with spawning pool object for management within the Pool Manager system.
 	 * Is generated automatically if not set. */

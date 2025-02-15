@@ -125,7 +125,7 @@ FSpawnRequest::FSpawnRequest(const UClass* InClass)
 	: Handle(InClass) {}
 
 // Returns array of spawn requests by specified class and their amount
-void FSpawnRequest::MakeRequests(TArray<FSpawnRequest>& OutRequests, const UClass* InClass, int32 Amount, ESpawnRequestPriority Priority)
+void FSpawnRequest::MakeRequests(TArray<FSpawnRequest>& OutRequests, const UClass* InClass, int32 Amount, ESpawnRequestPriority Priority, UObject* Context)
 {
 	if (!OutRequests.IsEmpty())
 	{
@@ -136,6 +136,7 @@ void FSpawnRequest::MakeRequests(TArray<FSpawnRequest>& OutRequests, const UClas
 	{
 		FSpawnRequest Request(InClass);
 		Request.Priority = Priority;
+		Request.Context = Context;
 		OutRequests.Emplace(MoveTemp(Request));
 	}
 }

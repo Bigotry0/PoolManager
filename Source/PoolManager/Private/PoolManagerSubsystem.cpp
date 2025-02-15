@@ -53,32 +53,81 @@ UPoolManagerSubsystem* UPoolManagerSubsystem::GetPoolManagerByClass(TSubclassOf<
  ********************************************************************************************* */
 
 // Async version of TakeFromPool() that returns the object by specified class
-void UPoolManagerSubsystem::BPTakeFromPool(const UClass* ObjectClass, const FTransform& Transform, const FOnTakenFromPool& Completed, ESpawnRequestPriority Priority)
+void UPoolManagerSubsystem::BPTakeFromPool(const UClass* ObjectClass, const FTransform& Transform, const FOnTakenFromPool& Completed, ESpawnRequestPriority Priority, UObject* Context)
 {
-	const FPoolObjectData* ObjectData = TakeFromPoolOrNull(ObjectClass, Transform);
+	FPoolObjectData* ObjectData = const_cast<FPoolObjectData*>(TakeFromPoolOrNull(ObjectClass, Transform));
+
 	if (ObjectData)
 	{
+		ObjectData->Context = Context;
+		
 		// Found in pool
-		Completed.ExecuteIfBound(ObjectData->PoolObject);
+		Completed.ExecuteIfBound(ObjectData->PoolObject, ObjectData->Context);
 		return;
 	}
 
 	FSpawnRequest Request(ObjectClass);
 	Request.Transform = Transform;
 	Request.Priority = Priority;
+	Request.Context = Context;
 	Request.Callbacks.OnPostSpawned = [Completed](const FPoolObjectData& It)
 	{
-		Completed.ExecuteIfBound(It.PoolObject);
+		Completed.ExecuteIfBound(It.PoolObject, It.Context);
 	};
 	CreateNewObjectInPool(Request);
 }
 
-// Is code async version of TakeFromPool() that calls callback functions when the object is ready
-FPoolObjectHandle UPoolManagerSubsystem::TakeFromPool(const UClass* ObjectClass, const FTransform& Transform/* = FTransform::Identity*/, const FOnSpawnCallback& Completed/* = nullptr*/, ESpawnRequestPriority Priority/* = ESpawnRequestPriority::Normal*/)
+FPoolObjectData UPoolManagerSubsystem::TakeFromPoolImmediate(const UClass* ObjectClass,
+                                                             const FTransform& Transform, UObject* Context)
 {
-	const FPoolObjectData* ObjectData = TakeFromPoolOrNull(ObjectClass, Transform);
+	if (!ensureMsgf(ObjectClass, TEXT("ASSERT: [%i] %hs:\n'Class' is not null in the Spawn Request!"), __LINE__, __FUNCTION__))
+ 	{
+ 		return FPoolObjectData::EmptyObject;
+ 	}
+
+	FPoolObjectData* ObjectData = const_cast<FPoolObjectData*>(TakeFromPoolOrNull(ObjectClass, Transform));
+
 	if (ObjectData)
 	{
+		ObjectData->Context = Context;
+		return *ObjectData;
+	}
+
+	FSpawnRequest Request(ObjectClass);
+	Request.Transform = Transform;
+	Request.Priority = ESpawnRequestPriority::Critical;
+	Request.Context = Context;
+
+	if (!Request.Handle.IsValid())
+	{
+		// Hash can be unset that is fine, generate new one
+		Request.Handle = FPoolObjectHandle::NewHandle(Request.GetClass());
+	}
+
+	// Always register new object in pool once it is spawned
+	const TWeakObjectPtr<ThisClass> WeakThis(this);
+	Request.Callbacks.OnPreRegistered = [WeakThis](const FPoolObjectData& ObjectData)
+	{
+		if (UPoolManagerSubsystem* PoolManager = WeakThis.Get())
+		{
+			PoolManager->RegisterObjectInPool(ObjectData);
+		}
+	};
+
+	const FPoolContainer& Pool = FindPoolOrAdd(Request.GetClass());
+	return Pool.GetFactoryChecked().ProcessRequestNow(Request);
+}
+
+// Is code async version of TakeFromPool() that calls callback functions when the object is ready
+FPoolObjectHandle UPoolManagerSubsystem::TakeFromPool(const UClass* ObjectClass, const FTransform& Transform/* = FTransform::Identity*/, const FOnSpawnCallback& Completed/* = nullptr*/, ESpawnRequestPriority
+                                                      Priority/* = ESpawnRequestPriority::Normal*/, UObject* Context /*= nullptr*/)
+{
+	FPoolObjectData* ObjectData = const_cast<FPoolObjectData*>(TakeFromPoolOrNull(ObjectClass, Transform));
+	
+	if (ObjectData)
+	{
+		ObjectData->Context = Context;
+		
 		if (Completed != nullptr)
 		{
 			Completed(*ObjectData);
@@ -90,6 +139,7 @@ FPoolObjectHandle UPoolManagerSubsystem::TakeFromPool(const UClass* ObjectClass,
 	FSpawnRequest Request(ObjectClass);
 	Request.Transform = Transform;
 	Request.Priority = Priority;
+	Request.Context = Context;
 	Request.Callbacks.OnPostSpawned = Completed;
 	return CreateNewObjectInPool(Request);
 }
@@ -141,7 +191,7 @@ const FPoolObjectData* UPoolManagerSubsystem::TakeFromPoolOrNull(const UClass* O
  ********************************************************************************************* */
 
 // Is the same as BPTakeFromPool() but for multiple objects
-void UPoolManagerSubsystem::BPTakeFromPoolArray(const UClass* ObjectClass, int32 Amount, const FOnTakenFromPoolArray& Completed, ESpawnRequestPriority Priority)
+void UPoolManagerSubsystem::BPTakeFromPoolArray(const UClass* ObjectClass, int32 Amount, const FOnTakenFromPoolArray& Completed, ESpawnRequestPriority Priority, UObject* Context)
 {
 	if (!ensureMsgf(ObjectClass, TEXT("ASSERT: [%i] %hs:\n'ObjectClass' is not specified!"), __LINE__, __FUNCTION__))
 	{
@@ -150,7 +200,7 @@ void UPoolManagerSubsystem::BPTakeFromPoolArray(const UClass* ObjectClass, int32
 
 	// --- Take if free objects in pool first
 	TArray<FSpawnRequest> InRequests;
-	FSpawnRequest::MakeRequests(/*out*/InRequests, ObjectClass, Amount, Priority);
+	FSpawnRequest::MakeRequests(/*out*/InRequests, ObjectClass, Amount, Priority, Context);
 	TArray<FPoolObjectData> FreeObjectsData;
 	TakeFromPoolArrayOrNull(/*out*/FreeObjectsData, InRequests);
 
@@ -177,7 +227,8 @@ void UPoolManagerSubsystem::BPTakeFromPoolArray(const UClass* ObjectClass, int32
 }
 
 // Is code-overridable alternative version of BPTakeFromPoolArray() that calls callback functions when all objects of the same class are ready
-void UPoolManagerSubsystem::TakeFromPoolArray(TArray<FPoolObjectHandle>& OutHandles, const UClass* ObjectClass, int32 Amount, const FOnSpawnAllCallback& Completed, ESpawnRequestPriority Priority/* = ESpawnRequestPriority::Normal*/)
+void UPoolManagerSubsystem::TakeFromPoolArray(TArray<FPoolObjectHandle>& OutHandles, const UClass* ObjectClass, int32 Amount, const FOnSpawnAllCallback& Completed, ESpawnRequestPriority
+                                              Priority/* = ESpawnRequestPriority::Normal*/, UObject* Context /*= nullptr*/)
 {
 	if (!ensureMsgf(ObjectClass, TEXT("ASSERT: [%i] %hs:\n'ObjectClass' is not specified!"), __LINE__, __FUNCTION__)
 		|| !ensureMsgf(Amount > 0, TEXT("ASSERT: [%i] %hs:\n'Amount' is less than 1!"), __LINE__, __FUNCTION__))
@@ -186,7 +237,7 @@ void UPoolManagerSubsystem::TakeFromPoolArray(TArray<FPoolObjectHandle>& OutHand
 	}
 
 	TArray<FSpawnRequest> InRequests;
-	FSpawnRequest::MakeRequests(/*out*/InRequests, ObjectClass, Amount, Priority);
+	FSpawnRequest::MakeRequests(/*out*/InRequests, ObjectClass, Amount, Priority, Context);
 	TArray<FPoolObjectData> FreeObjectsData;
 	TakeFromPoolArrayOrNull(/*out*/FreeObjectsData, InRequests);
 	FPoolObjectHandle::Conv_ObjectsToHandles(OutHandles, FreeObjectsData);
@@ -237,7 +288,7 @@ void UPoolManagerSubsystem::TakeFromPoolArray(TArray<FPoolObjectHandle>& OutHand
 }
 
 // Is alternative version of TakeFromPoolArrayOrNull() to find multiple object in pool or return null
-void UPoolManagerSubsystem::TakeFromPoolArrayOrNull(TArray<FPoolObjectData>& OutObjects, TArray<FSpawnRequest>& InRequests)
+void UPoolManagerSubsystem::TakeFromPoolArrayOrNull(TArray<FPoolObjectData>& OutObjects, TArray<FSpawnRequest>& InRequests, UObject* Context)
 {
 	if (!OutObjects.IsEmpty())
 	{
@@ -246,8 +297,12 @@ void UPoolManagerSubsystem::TakeFromPoolArrayOrNull(TArray<FPoolObjectData>& Out
 
 	for (FSpawnRequest& ItRef : InRequests)
 	{
-		if (const FPoolObjectData* ObjectData = TakeFromPoolOrNull(ItRef.GetClass(), ItRef.Transform))
+		ItRef.Context = Context;
+
+		if (FPoolObjectData* ObjectData = const_cast<FPoolObjectData*>(TakeFromPoolOrNull(ItRef.GetClass(), ItRef.Transform)))
 		{
+			ObjectData->Context = Context;
+
 			ItRef.Handle = ObjectData->Handle;
 			OutObjects.Emplace(*ObjectData);
 		}

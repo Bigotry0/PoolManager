@@ -53,7 +53,7 @@ public:
 
 	/** Calls SpawnNow with the given request and process the callbacks. */
 	UFUNCTION(BlueprintCallable, Category = "Pool Factory")
-	void ProcessRequestNow(const FSpawnRequest& Request);
+	FPoolObjectData ProcessRequestNow(const FSpawnRequest& Request);
 
 	/** Method to immediately spawn requested object.
 	 * Is called after 'DequeueSpawnRequest'. */

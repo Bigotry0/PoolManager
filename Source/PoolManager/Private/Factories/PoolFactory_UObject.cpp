@@ -94,7 +94,7 @@ bool UPoolFactory_UObject::DequeueSpawnRequest(FSpawnRequest& OutRequest)
 }
 
 // Calls SpawnNow with the given request and process the callbacks
-void UPoolFactory_UObject::ProcessRequestNow(const FSpawnRequest& Request)
+FPoolObjectData UPoolFactory_UObject::ProcessRequestNow(const FSpawnRequest& Request)
 {
 	UObject* CreatedObject = SpawnNow(Request);
 	checkf(CreatedObject, TEXT("ERROR: [%i] %hs:\n'CreatedObject' failed to spawn!"), __LINE__, __FUNCTION__);
@@ -103,9 +103,12 @@ void UPoolFactory_UObject::ProcessRequestNow(const FSpawnRequest& Request)
 	ObjectData.bIsActive = true;
 	ObjectData.PoolObject = CreatedObject;
 	ObjectData.Handle = Request.Handle;
+	ObjectData.Context = Request.Context;
 
 	OnPreRegistered(Request, ObjectData);
 	OnPostSpawned(Request, ObjectData);
+
+	return ObjectData;
 }
 
 // Alternative method to remove specific spawn request from the queue and returns it.
